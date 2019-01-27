@@ -36,6 +36,7 @@ mkdir -p \
 # Don't delete the Lets Encrypt config directory. This image uses it. 
 # Instead, look for the Lets Encrypt config tarball in /config/etc/letsencrypt directory and extract it to /etc/letsencrypt
 if [ -f /config/etc/letsencrypt/letsencrypt-config.tar.gz ]; then
+    echo "Previous Lets Encrypt config found."
     tar -xzf /config/etc/letsencrypt/letsencrypt-config.tar.gz -C /
 fi
 
@@ -221,6 +222,7 @@ if [ -z "$(ls -A /etc/letsencrypt/live)" ]; then
       ln -s /etc/letsencrypt/live/"$URL" /etc/letsencrypt/current
     fi
 
+    echo "Archiving Lets Encrypt config and keys to /config/etc/letsencrypt/letsencrypt-config.tar.gz"
     tar -czf /config/etc/letsencrypt/letsencrypt-config.tar.gz -C / etc/letsencrypt/
   else
     if [ "$VALIDATION" = "dns" ]; then
