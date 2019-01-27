@@ -1,3 +1,17 @@
+# Why is there a fork?
+
+This project is a **FORK** of the excellent LinuxServer.io "Let's Encrypt" container. The difference is in the way the Let's Encrypt configuration data is persisted across container restarts. 
+
+The parent project creates a symlink from the Let's Encrypt config directory `/etc/letsencrypt` to an externally mounted volume, meaning the configuration persists between restarts. That's a simple solution that works *unless* the mounted file system does not itself support symlinks - like Azure File services. In that case, errors will occur because `certbot` tries to create a symlink within that mounted directory and fails with `OSError: [Errno 95] Operation not supported`. 
+
+Instead of moving the config directory to an external volume, this approach keeps the config directory within the container but zips up configuration when it changes, and unzips the configuration when the container restarts. This preserves all keys and symlinks and so the outcome is the same but it works with Azure Files.
+
+The location of the config (from the perspective of the container instance) is `/config/etc/letsencrypt/letsencrypt-config.tar.gz`. `/config` is a volume mounted when the docker container starts.
+
+This is (so far) working but consider it untested. A packaged Docker image is not currently available but you can build it yourself.
+
+# Welcome
+
 [linuxserverurl]: https://linuxserver.io
 [forumurl]: https://forum.linuxserver.io
 [ircurl]: https://www.linuxserver.io/irc/
