@@ -32,8 +32,12 @@ done
 mkdir -p \
 	/config/{log/letsencrypt,log/fail2ban,etc/letsencrypt,fail2ban,crontabs,dns-conf} \
 	/var/run/fail2ban
-rm -rf /etc/letsencrypt
-ln -s /config/etc/letsencrypt /etc/letsencrypt
+
+# Don't delete the Lets Encrypt config directory. This image uses it. 
+# Instead, look for the Lets Encrypt config tarball in /config/etc/letsencrypt directory and extract it to /etc/letsencrypt
+if [ -f /config/etc/letsencrypt/letsencrypt-config.tar.gz ]; then
+    tar -xzf /config/etc/letsencrypt/letsencrypt-config.tar.gz -C /
+fi
 
 # copy dns default configs
 cp -n /defaults/dns-conf/* /config/dns-conf/
@@ -185,38 +189,39 @@ else
   echo "http validation is selected"
 fi
 
-# setting the symlink for key location
-rm -rf /config/keys/letsencrypt
-if [ "$ONLY_SUBDOMAINS" = "true" ] && [ ! "$SUBDOMAINS" = "wildcard" ] ; then
-  DOMAIN="$(echo "$SUBDOMAINS" | tr ',' ' ' | awk '{print $1}').${URL}"
-  ln -s ../etc/letsencrypt/live/"$DOMAIN" /config/keys/letsencrypt
-else
-  ln -s ../etc/letsencrypt/live/"$URL" /config/keys/letsencrypt
-fi
-
 # checking for changes in cert variables, revoking certs if necessary
 if [ ! "$URL" = "$ORIGURL" ] || [ ! "$SUBDOMAINS" = "$ORIGSUBDOMAINS" ] || [ ! "$ONLY_SUBDOMAINS" = "$ORIGONLY_SUBDOMAINS" ] || [ ! "$EXTRA_DOMAINS" = "$ORIGEXTRA_DOMAINS" ] || [ ! "$VALIDATION" = "$ORIGVALIDATION" ] || [ ! "$DNSPLUGIN" = "$ORIGDNSPLUGIN" ] || [ ! "$STAGING" = "$ORIGSTAGING" ]; then
   echo "Different validation parameters entered than what was used before. Revoking and deleting existing certificate, and an updated one will be created"
   if [ "$ORIGONLY_SUBDOMAINS" = "true" ] && [ ! "$ORIGSUBDOMAINS" = "wildcard" ]; then
     ORIGDOMAIN="$(echo "$ORIGSUBDOMAINS" | tr ',' ' ' | awk '{print $1}').${ORIGURL}"
-    [[ -f /config/etc/letsencrypt/live/"$ORIGDOMAIN"/fullchain.pem ]] && certbot revoke --non-interactive --cert-path /config/etc/letsencrypt/live/"$ORIGDOMAIN"/fullchain.pem
+    [[ -f /etc/letsencrypt/live/"$ORIGDOMAIN"/fullchain.pem ]] && certbot revoke --non-interactive --cert-path /etc/letsencrypt/live/"$ORIGDOMAIN"/fullchain.pem
   else
-    [[ -f /config/etc/letsencrypt/live/"$ORIGURL"/fullchain.pem ]] && certbot revoke --non-interactive --cert-path /config/etc/letsencrypt/live/"$ORIGURL"/fullchain.pem
+    [[ -f /etc/letsencrypt/live/"$ORIGURL"/fullchain.pem ]] && certbot revoke --non-interactive --cert-path /etc/letsencrypt/live/"$ORIGURL"/fullchain.pem
   fi
-  rm -rf /config/etc
-  mkdir -p /config/etc/letsencrypt
 fi
 
 # saving new variables
 echo -e "ORIGURL=\"$URL\" ORIGSUBDOMAINS=\"$SUBDOMAINS\" ORIGONLY_SUBDOMAINS=\"$ONLY_SUBDOMAINS\" ORIGEXTRA_DOMAINS=\"$EXTRA_DOMAINS\" ORIGDHLEVEL=\"$DHLEVEL\" ORIGVALIDATION=\"$VALIDATION\" ORIGDNSPLUGIN=\"$DNSPLUGIN\" ORIGSTAGING=\"$STAGING\" ORIGDUCKDNSTOKEN=\"$DUCKDNSTOKEN\"" > /config/donoteditthisfile.conf
 
-# generating certs if necessary
-if [ ! -f "/config/keys/letsencrypt/fullchain.pem" ]; then
+# generating certs if necessary. This directory can only have files if it was untarred in the precious step.
+if [ -z "$(ls -A /etc/letsencrypt/live)" ]; then
   echo "Generating new certificate"
- # shellcheck disable=SC2086
- certbot certonly --renew-by-default --server $ACMESERVER $PREFCHAL --rsa-key-size 4096 $EMAILPARAM --agree-tos $URL_REAL
-  if [ -d /config/keys/letsencrypt ]; then
-    cd /config/keys/letsencrypt || exit
+  # shellcheck disable=SC2086
+  certbot certonly --renew-by-default --server $ACMESERVER $PREFCHAL --rsa-key-size 4096 $EMAILPARAM --agree-tos $URL_REAL
+  
+  # If certbot succeeded, then the directory will no longer be empty
+  if ! [ -z "$(ls -A /etc/letsencrypt/live)" ]; then
+
+    # setting the symlink for key location
+    rm -rf /etc/letsencrypt/keys
+    if [ "$ONLY_SUBDOMAINS" = "true" ] && [ ! "$SUBDOMAINS" = "wildcard" ] ; then
+      DOMAIN="$(echo "$SUBDOMAINS" | tr ',' ' ' | awk '{print $1}').${URL}"
+      ln -s /etc/letsencrypt/live/"$DOMAIN" /etc/letsencrypt/current
+    else
+      ln -s /etc/letsencrypt/live/"$URL" /etc/letsencrypt/current
+    fi
+
+    tar -czf /config/etc/letsencrypt/letsencrypt-config.tar.gz -C / etc/letsencrypt/
   else
     if [ "$VALIDATION" = "dns" ]; then
       echo "ERROR: Cert does not exist! Please see the validation error above. Make sure you entered correct credentials into the /config/dns-conf/${DNSPLUGIN}.ini file."
@@ -227,9 +232,7 @@ if [ ! -f "/config/keys/letsencrypt/fullchain.pem" ]; then
     fi
     sleep infinity
   fi
-  openssl pkcs12 -export -out privkey.pfx -inkey privkey.pem -in cert.pem -certfile chain.pem -passout pass:
-  sleep 1
-  cat {privkey,fullchain}.pem > priv-fullchain-bundle.pem
+
   echo "New certificate generated; starting nginx"
 else
   echo "Certificate exists; parameters unchanged; starting nginx"
